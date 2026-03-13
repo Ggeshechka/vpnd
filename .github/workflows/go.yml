@@ -7,8 +7,8 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build-linux:
-    name: Build Linux
+  build:
+    name: Build
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
@@ -17,35 +17,22 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version: '1.26'
+        cache: true
 
-    - name: Build
-      run: GOOS=linux GOARCH=amd64 go build -v -o goapp .
+    - name: Build Linux
+      run: GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -buildid=" -v -o goapp .
+
+    - name: Build Windows
+      run: GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -buildid=" -v -o goapp.exe .
 
     - name: Upload Linux Artifact
       uses: actions/upload-artifact@v7
       with:
         name: linux-build
-        path: goapp
-
-  build-windows:
-    name: Build Windows
-    runs-on: windows-latest
-    steps:
-    - uses: actions/checkout@v6
-
-    - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version: '1.26'
-
-    - name: Build
-      run: go build -v -o goapp.exe .
-      env:
-        GOOS: windows
-        GOARCH: amd64
+        path: vpnd
 
     - name: Upload Windows Artifact
       uses: actions/upload-artifact@v7
       with:
         name: windows-build
-        path: goapp.exe
+        path: vpnd.exe
