@@ -1,0 +1,51 @@
+name: Go
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.26'
+
+    - name: Build
+      run: GOOS=linux GOARCH=amd64 go build -v -o goapp .
+
+    - name: Upload Linux Artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: linux-build
+        path: goapp
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.26'
+
+    - name: Build
+      run: go build -v -o goapp.exe .
+      env:
+        GOOS: windows
+        GOARCH: amd64
+
+    - name: Upload Windows Artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: windows-build
+        path: goapp.exe
