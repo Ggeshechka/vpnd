@@ -1,4 +1,5 @@
 //go:build windows
+
 package main
 
 import (
@@ -24,7 +25,7 @@ const (
 )
 
 func getPhysicalIP() (string, error) {
-	// Подключение не устанавливается физически (это UDP), 
+	// Подключение не устанавливается физически (это UDP),
 	// но ОС определяет, через какой интерфейс пойдет пакет, и возвращает его IP.
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err != nil {
@@ -126,7 +127,7 @@ func teardownNetwork() error {
 		_ = tunLUID.DeleteRoute(netip.MustParsePrefix("0.0.0.0/1"), netip.IPv4Unspecified())
 		_ = tunLUID.DeleteRoute(netip.MustParsePrefix("128.0.0.0/1"), netip.IPv4Unspecified())
 	}
-	
+
 	// 2. Останавливаем tun2socks
 	engine.Stop()
 	return nil
