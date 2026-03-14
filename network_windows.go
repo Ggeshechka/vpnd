@@ -16,7 +16,7 @@ import (
 
 const (
 	tunName    = "xray0"
-	vpsAddress = "de.safelane.pro"
+	vpsAddress = "188.40.167.82" // Жестко заданный IP сервера во избежание петель DNS
 )
 
 func getPhysicalGateway() (winipcfg.LUID, netip.Addr, error) {
@@ -69,41 +69,64 @@ func getRURoutes() ([]netip.Prefix, error) {
 }
 
 func setupNetwork() error {
-	time.Sleep(3 * time.Second)
+	time.Sleep(3 * time.Second) // Ждем инициализации TUN адаптера
 
-	ips, _ := net.LookupIP(vpsAddress)
-	vpsIP, _ := netip.AddrFromSlice(ips[0].To4())
-	physLUID, nextHop, _ := getPhysicalGateway()
-	tunIf, _ := net.InterfaceByName(tunName)
-	tunLUID, _ := winipcfg.LUIDFromIndex(uint32(tunIf.Index))
+	vpsIP, err := netip.ParseAddr(vpsAddress)
+	if err != nil {
+		return fmt.Errorf("ошибка парсинга IP сервера: %v", err)
+	}
 
-	// 1. Маршрут до VPS
-	physLUID.AddRoute(netip.PrefixFrom(vpsIP, 32), nextHop, 0)
+	physLUID, nextHop, err := getPhysicalGateway()
+	if err != nil {
+		return fmt.Errorf("ошибка получения шлюза: %v", err)
+	}
 
-	// 2. Читаем geoip.dat и направляем RU-трафик мимо туннеля
+	tunIf, err := net.InterfaceByName(tunName)
+	if err != nil {
+		return fmt.Errorf("интерфейс %s не найден: %v", tunName, err)
+	}
+	tunLUID, err := winipcfg.LUIDFromIndex(uint32(tunIf.Index))
+	if err != nil {
+		return fmt.Errorf("ошибка LUID TUN: %v", err)
+	}
+
+	// 1. Исключение: маршрут до VPS через физический шлюз
+	err = physLUID.AddRoute(netip.PrefixFrom(vpsIP, 32), nextHop, 0)
+	if err != nil {
+		fmt.Printf("КРИТИЧЕСКАЯ ОШИБКА маршрута VPS (нужны права Администратора?): %v\n", err)
+		return err
+	}
+
+	// 2. Исключение: RU-сети мимо VPN
 	ruPrefixes, err := getRURoutes()
 	if err == nil {
 		for _, prefix := range ruPrefixes {
-			physLUID.AddRoute(prefix, nextHop, 0)
+			_ = physLUID.AddRoute(prefix, nextHop, 0)
 		}
+	} else {
+		fmt.Printf("Ошибка чтения geoip.dat: %v\n", err)
 	}
 
-	// 3. Заворачиваем остальной мир в TUN
-	tunLUID.AddRoute(netip.MustParsePrefix("0.0.0.0/1"), netip.IPv4Unspecified(), 0)
-	tunLUID.AddRoute(netip.MustParsePrefix("128.0.0.0/1"), netip.IPv4Unspecified(), 0)
+	// 3. Заворачиваем весь остальной мир в TUN
+	err = tunLUID.AddRoute(netip.MustParsePrefix("0.0.0.0/1"), netip.IPv4Unspecified(), 0)
+	if err != nil {
+		fmt.Printf("Ошибка маршрута 0.0.0.0/1: %v\n", err)
+	}
+	err = tunLUID.AddRoute(netip.MustParsePrefix("128.0.0.0/1"), netip.IPv4Unspecified(), 0)
+	if err != nil {
+		fmt.Printf("Ошибка маршрута 128.0.0.0/1: %v\n", err)
+	}
 
 	return nil
 }
 
 func teardownNetwork() error {
-	ips, err := net.LookupIP(vpsAddress)
-	if err == nil && len(ips) > 0 {
-		vpsIP, _ := netip.AddrFromSlice(ips[0].To4())
+	vpsIP, err := netip.ParseAddr(vpsAddress)
+	if err == nil {
 		physLUID, nextHop, err := getPhysicalGateway()
 		if err == nil {
 			physLUID.DeleteRoute(netip.PrefixFrom(vpsIP, 32), nextHop)
 			
-			// Удаляем маршруты RU
 			ruPrefixes, err := getRURoutes()
 			if err == nil {
 				for _, prefix := range ruPrefixes {
@@ -115,9 +138,11 @@ func teardownNetwork() error {
 
 	tunIf, err := net.InterfaceByName(tunName)
 	if err == nil {
-		tunLUID, _ := winipcfg.LUIDFromIndex(uint32(tunIf.Index))
-		tunLUID.DeleteRoute(netip.MustParsePrefix("0.0.0.0/1"), netip.IPv4Unspecified())
-		tunLUID.DeleteRoute(netip.MustParsePrefix("128.0.0.0/1"), netip.IPv4Unspecified())
+		tunLUID, err := winipcfg.LUIDFromIndex(uint32(tunIf.Index))
+		if err == nil {
+			tunLUID.DeleteRoute(netip.MustParsePrefix("0.0.0.0/1"), netip.IPv4Unspecified())
+			tunLUID.DeleteRoute(netip.MustParsePrefix("128.0.0.0/1"), netip.IPv4Unspecified())
+		}
 	}
 
 	return nil
