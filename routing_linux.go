@@ -26,3 +26,17 @@ func setupNetwork() error {
 func teardownNetwork() error {
 	return exec.Command("ip", "rule", "del", "not", "fwmark", "255", "lookup", "100").Run()
 }
+
+func configureOutbound(o map[string]interface{}, physIP string) {
+	if o["streamSettings"] == nil {
+		o["streamSettings"] = make(map[string]interface{})
+	}
+	ss := o["streamSettings"].(map[string]interface{})
+
+	if ss["sockopt"] == nil {
+		ss["sockopt"] = make(map[string]interface{})
+	}
+	so := ss["sockopt"].(map[string]interface{})
+
+	so["mark"] = 255
+}
