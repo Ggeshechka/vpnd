@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/kardianos/service"
 	"github.com/xtls/xray-core/core"
@@ -137,7 +138,8 @@ func apiStop(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	os.Setenv("xray.location.asset", ".")
+	exe, _ := os.Executable()
+	os.Setenv("xray.location.asset", filepath.Dir(exe))
 
 	svcConfig := &service.Config{
 		Name:        "vpnd",
