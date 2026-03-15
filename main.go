@@ -42,14 +42,16 @@ func startXray() (*core.Instance, error) {
 	}
 
 	var config map[string]interface{}
-	json.Unmarshal(data, &config)
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
 
 	outbounds := config["outbounds"].([]interface{})
 	for _, out := range outbounds {
 		o := out.(map[string]interface{})
 		tag := o["tag"].(string)
 		if tag == "proxy" || tag == "direct" {
-			o["sendThrough"] = physIP
+			configureOutbound(o, physIP)
 		}
 	}
 
@@ -69,7 +71,11 @@ func startXray() (*core.Instance, error) {
 		return nil, err
 	}
 
-	return server, server.Start()
+	if err := server.Start(); err != nil {
+		return nil, err
+	}
+
+	return server, nil
 }
 
 func main() {

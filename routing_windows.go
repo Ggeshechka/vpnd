@@ -1,70 +1,44 @@
-//go:build windows
+//go:build linux
 
 package main
 
 import (
 	"fmt"
-	"log"
-	"net"
-	"net/netip"
+	"os/exec"
 	"time"
-
-	"golang.org/x/sys/windows"
-	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 )
 
-func getPhysicalGateway() (winipcfg.LUID, netip.Addr, error) {
-	routes, err := winipcfg.GetIPForwardTable2(windows.AF_INET)
-	if err != nil {
-		return 0, netip.Addr{}, err
+func configureOutbound(o map[string]interface{}, physIP string) {
+	if o["streamSettings"] == nil {
+		o["streamSettings"] = make(map[string]interface{})
 	}
-
-	var bestLUID winipcfg.LUID
-	var bestNextHop netip.Addr
-	var lowestMetric uint32 = ^uint32(0)
-
-	for _, r := range routes {
-		if r.DestinationPrefix.PrefixLength == 0 && r.Metric < lowestMetric {
-			lowestMetric = r.Metric
-			bestLUID = r.InterfaceLUID
-			bestNextHop = r.NextHop.Addr()
-		}
+	ss := o["streamSettings"].(map[string]interface{})
+	
+	if ss["sockopt"] == nil {
+		ss["sockopt"] = make(map[string]interface{})
 	}
-
-	if lowestMetric == ^uint32(0) {
-		return 0, netip.Addr{}, fmt.Errorf("шлюз не найден")
-	}
-	return bestLUID, bestNextHop, nil
+	so := ss["sockopt"].(map[string]interface{})
+	
+	so["mark"] = 255
 }
 
 func setupRouting() error {
 	time.Sleep(3 * time.Second)
 
-	physLUID, nextHop, err := getPhysicalGateway()
-	if err != nil {
-		return err
+	cmds := [][]string{
+		{"ip", "addr", "add", "172.19.0.2/24", "dev", tunName},
+		{"ip", "link", "set", "dev", tunName, "up"},
+		{"ip", "route", "add", "default", "dev", tunName, "table", "100"},
+		{"ip", "rule", "add", "fwmark", "255", "lookup", "main"},
+		{"ip", "rule", "add", "not", "fwmark", "255", "table", "100"},
 	}
 
-	tunIf, err := net.InterfaceByName(tunName)
-	if err != nil {
-		return err
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		if err := cmd.Run(); err != nil {
+			fmt.Printf("Ошибка при выполнении %v: %v\n", args, err)
+		}
 	}
-	tunLUID, err := winipcfg.LUIDFromIndex(uint32(tunIf.Index))
-	if err != nil {
-		return err
-	}
-
-	tunIP := netip.MustParsePrefix("172.19.0.2/24")
-	_ = tunLUID.SetIPAddresses([]netip.Prefix{tunIP})
-
-	serverIP := netip.MustParseAddr(vpsIP)
-	err = physLUID.AddRoute(netip.PrefixFrom(serverIP, 32), nextHop, 0)
-	if err != nil {
-		log.Printf("ВНИМАНИЕ: Ошибка маршрута до VPS: %v", err)
-	}
-
-	_ = tunLUID.AddRoute(netip.MustParsePrefix("0.0.0.0/1"), netip.IPv4Unspecified(), 0)
-	_ = tunLUID.AddRoute(netip.MustParsePrefix("128.0.0.0/1"), netip.IPv4Unspecified(), 0)
 
 	return nil
 }
