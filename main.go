@@ -17,7 +17,10 @@ import (
 	_ "github.com/xtls/xray-core/main/json"
 )
 
-const vpsIP = "188.40.167.82"
+const (
+	vpsIP   = "188.40.167.82"
+	tunName = "xray0"
+)
 
 var xrayInstance *core.Instance
 
