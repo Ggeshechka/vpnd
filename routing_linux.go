@@ -41,5 +41,7 @@ func setupNetwork() error {
 }
 
 func teardownNetwork() error {
-	return exec.Command("ip", "rule", "del", "not", "fwmark", "255", "lookup", "100").Run()
+	exec.Command("ip", "rule", "del", "not", "fwmark", "255", "lookup", "100").Run()
+	exec.Command("ip", "link", "delete", "dev", "xray0").Run()
+	return nil
 }

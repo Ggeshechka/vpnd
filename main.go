@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"	
 
 	"github.com/kardianos/service"
 	"github.com/xtls/xray-core/core"
@@ -111,6 +112,7 @@ func stopVPN() {
 		teardownNetwork()
 		xrayInstance.Close()
 		xrayInstance = nil
+		time.Sleep(1 * time.Second) // Даем ОС время освободить ресурсы
 	}
 }
 
@@ -136,6 +138,8 @@ func apiStop(w http.ResponseWriter, r *http.Request) {
 	stopVPN()
 	w.Write([]byte("vpn_stopped"))
 }
+
+
 
 func main() {
 	exe, _ := os.Executable()
