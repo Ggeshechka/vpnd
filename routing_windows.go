@@ -5,32 +5,24 @@ package main
 import (
 	"fmt"
 	"os/exec"
-	"strings"
 	"time"
 )
 
-var ifIndex string
-
 func configureOutbound(o map[string]interface{}, physIP string) {
-	// На Windows жестко привязываем исходящий трафик к физическому IP для обхода петли
 	o["sendThrough"] = physIP
-}
-
-func getCmdOutput(name string, args ...string) (string, error) {
-	out, err := exec.Command(name, args...).Output()
-	return strings.TrimSpace(string(out)), err
 }
 
 func setupNetwork() error {
 	time.Sleep(3 * time.Second) // Wintun нужно время на создание адаптера
 
-	idx, err := getCmdOutput("powershell", "-Command", "(Get-NetAdapter -Name 'xray0').InterfaceIndex")
-	if err != nil || idx == "" {
-		return fmt.Errorf("интерфейс xray0 не найден")
+	// Назначаем IP-адрес интерфейсу
+	err := exec.Command("netsh", "interface", "ip", "set", "address", "name=xray0", "source=static", "addr=172.19.0.2", "mask=255.255.255.0").Run()
+	if err != nil {
+		return fmt.Errorf("ошибка назначения IP адаптеру xray0: %v", err)
 	}
-	ifIndex = idx
 
-	err = exec.Command("route", "add", "0.0.0.0", "mask", "0.0.0.0", "0.0.0.0", "IF", ifIndex, "metric", "5").Run()
+	// Направляем весь трафик в TUN
+	err = exec.Command("netsh", "interface", "ipv4", "add", "route", "0.0.0.0/0", "xray0", "172.19.0.2", "metric=5").Run()
 	if err != nil {
 		return fmt.Errorf("ошибка добавления маршрута: %v", err)
 	}
@@ -39,8 +31,6 @@ func setupNetwork() error {
 }
 
 func teardownNetwork() error {
-	if ifIndex != "" {
-		exec.Command("route", "delete", "0.0.0.0", "mask", "0.0.0.0", "0.0.0.0", "IF", ifIndex).Run()
-	}
+	exec.Command("netsh", "interface", "ipv4", "delete", "route", "0.0.0.0/0", "xray0", "172.19.0.2").Run()
 	return nil
 }
