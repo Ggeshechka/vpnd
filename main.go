@@ -17,7 +17,8 @@ import (
 )
 
 const (
-	vpsIP = "188.40.167.82"
+	tunName = "xray-tun"
+	vpsIP   = "188.40.167.82"
 )
 
 func getPhysicalIP() (string, error) {
@@ -34,6 +35,8 @@ func startXray() (*core.Instance, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ошибка получения физического IP: %v", err)
 	}
+
+	log.Printf("Обнаружен физический IP: %s", physIP)
 
 	data, err := os.ReadFile("config.json")
 	if err != nil {
@@ -80,19 +83,24 @@ func startXray() (*core.Instance, error) {
 func main() {
 	os.Setenv("xray.location.asset", ".")
 
+	log.Println("Запуск Xray-core...")
 	xrayServer, err := startXray()
 	if err != nil {
-		log.Fatalf("Ошибка Xray: %v", err)
+		log.Fatalf("Ошибка запуска Xray: %v", err)
 	}
 	defer xrayServer.Close()
 
+	log.Println("Настройка маршрутизации...")
 	if err := setupNetwork(); err != nil {
 		log.Fatalf("Ошибка маршрутизации: %v", err)
 	}
 	defer teardownNetwork()
 
-	log.Println("VPN работает. Нажмите Ctrl+C для выхода.")
+	log.Println("VPN успешно работает. Нажмите Ctrl+C для выхода.")
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
+
+	log.Println("Остановка...")
 }
