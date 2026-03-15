@@ -137,6 +137,13 @@ func apiStart(w http.ResponseWriter, r *http.Request) {
 func apiStop(w http.ResponseWriter, r *http.Request) {
 	stopVPN()
 	w.Write([]byte("vpn_stopped"))
+	
+	// Очищаем состояние Wintun через смерть процесса
+	// Служба будет мгновенно перезапущена системой
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		os.Exit(1)
+	}()
 }
 
 
@@ -149,6 +156,9 @@ func main() {
 		Name:        "vpnd",
 		DisplayName: "VPN Daemon",
 		Description: "Фоновая служба для управления ядром VPN",
+		Option: service.KeyValue{
+			"OnFailure": "restart", // <--- ДОБАВИТЬ ЭТО. Заставит Windows перезапускать процесс
+		},
 	}
 
 	prg := &program{}

@@ -42,34 +42,42 @@ func getPhysicalGateway() (winipcfg.LUID, netip.Addr, error) {
 }
 
 func setupNetwork() error {
-	time.Sleep(3 * time.Second) // Ждем инициализации TUN от Xray
+	var tunIf *net.Interface
+	var err error
+
+	log.Println("Ожидание интерфейса Wintun...")
+	// Пингуем появление интерфейса до 15 секунд
+	for i := 0; i < 15; i++ {
+		tunIf, err = net.InterfaceByName(tunName)
+		if err == nil {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	if err != nil {
+		return fmt.Errorf("интерфейс %s не найден после 15 сек (проверьте права Администратора): %v", tunName, err)
+	}
 
 	physLUID, nextHop, err := getPhysicalGateway()
 	if err != nil {
 		return fmt.Errorf("ошибка физического интерфейса: %v", err)
 	}
 
-	tunIf, err := net.InterfaceByName(tunName)
-	if err != nil {
-		return fmt.Errorf("интерфейс %s не найден (проверьте права Администратора): %v", tunName, err)
-	}
 	tunLUID, err := winipcfg.LUIDFromIndex(uint32(tunIf.Index))
 	if err != nil {
 		return err
 	}
 
-	// 1. Назначаем IP-адрес TUN-интерфейсу
 	tunIP := netip.MustParsePrefix("172.19.0.2/24")
 	_ = tunLUID.SetIPAddresses([]netip.Prefix{tunIP})
 
-	// 2. Исключение для VPS: маршрут через физический шлюз
 	serverIP := netip.MustParseAddr(vpsIP)
 	err = physLUID.AddRoute(netip.PrefixFrom(serverIP, 32), nextHop, 0)
 	if err != nil {
 		log.Printf("ВНИМАНИЕ: Ошибка маршрута до VPS (петля возможна): %v", err)
 	}
 
-	// 3. Заворачиваем весь трафик системы в TUN
 	_ = tunLUID.AddRoute(netip.MustParsePrefix("0.0.0.0/1"), netip.IPv4Unspecified(), 0)
 	_ = tunLUID.AddRoute(netip.MustParsePrefix("128.0.0.0/1"), netip.IPv4Unspecified(), 0)
 
@@ -77,6 +85,5 @@ func setupNetwork() error {
 }
 
 func teardownNetwork() error {
-	// winipcfg автоматически удаляет маршруты TUN-интерфейса при его закрытии
 	return nil
 }
