@@ -1,44 +1,46 @@
-//go:build linux
+//go:build windows
 
 package main
 
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 )
 
+var ifIndex string
+
 func configureOutbound(o map[string]interface{}, physIP string) {
-	if o["streamSettings"] == nil {
-		o["streamSettings"] = make(map[string]interface{})
-	}
-	ss := o["streamSettings"].(map[string]interface{})
-	
-	if ss["sockopt"] == nil {
-		ss["sockopt"] = make(map[string]interface{})
-	}
-	so := ss["sockopt"].(map[string]interface{})
-	
-	so["mark"] = 255
+	// На Windows жестко привязываем исходящий трафик к физическому IP для обхода петли
+	o["sendThrough"] = physIP
 }
 
-func setupRouting() error {
-	time.Sleep(3 * time.Second)
+func getCmdOutput(name string, args ...string) (string, error) {
+	out, err := exec.Command(name, args...).Output()
+	return strings.TrimSpace(string(out)), err
+}
 
-	cmds := [][]string{
-		{"ip", "addr", "add", "172.19.0.2/24", "dev", tunName},
-		{"ip", "link", "set", "dev", tunName, "up"},
-		{"ip", "route", "add", "default", "dev", tunName, "table", "100"},
-		{"ip", "rule", "add", "fwmark", "255", "lookup", "main"},
-		{"ip", "rule", "add", "not", "fwmark", "255", "table", "100"},
+func setupNetwork() error {
+	time.Sleep(3 * time.Second) // Wintun нужно время на создание адаптера
+
+	idx, err := getCmdOutput("powershell", "-Command", "(Get-NetAdapter -Name 'xray0').InterfaceIndex")
+	if err != nil || idx == "" {
+		return fmt.Errorf("интерфейс xray0 не найден")
+	}
+	ifIndex = idx
+
+	err = exec.Command("route", "add", "0.0.0.0", "mask", "0.0.0.0", "0.0.0.0", "IF", ifIndex, "metric", "5").Run()
+	if err != nil {
+		return fmt.Errorf("ошибка добавления маршрута: %v", err)
 	}
 
-	for _, args := range cmds {
-		cmd := exec.Command(args[0], args[1:]...)
-		if err := cmd.Run(); err != nil {
-			fmt.Printf("Ошибка при выполнении %v: %v\n", args, err)
-		}
-	}
+	return nil
+}
 
+func teardownNetwork() error {
+	if ifIndex != "" {
+		exec.Command("route", "delete", "0.0.0.0", "mask", "0.0.0.0", "0.0.0.0", "IF", ifIndex).Run()
+	}
 	return nil
 }
