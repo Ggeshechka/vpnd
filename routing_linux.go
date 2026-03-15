@@ -1,74 +1,50 @@
-//go:build windows
-
+//go:build linux
 package main
 
 import (
 	"fmt"
-	"log"
-	"net"
-	"net/netip"
-	"time"
-
-	"golang.org/x/sys/windows"
-	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
+	"os/exec"
 )
 
-func configureOutbound(o map[string]interface{}, physIP string) {
-	o["sendThrough"] = physIP
-}
-
-func getPhysicalGateway() (winipcfg.LUID, netip.Addr, error) {
-	routes, err := winipcfg.GetIPForwardTable2(windows.AF_INET)
-	if err != nil {
-		return 0, netip.Addr{}, err
+func setupNetwork() error {
+	// Поднимаем интерфейс и даем ему IP
+	commands := [][]string{
+		{"ip", "addr", "add", "172.19.0.1/30", "dev", "xray0"},
+		{"ip", "link", "set", "dev", "xray0", "up"},
 	}
 
-	var bestLUID winipcfg.LUID
-	var bestNextHop netip.Addr
-	var lowestMetric uint32 = ^uint32(0)
-
-	for _, r := range routes {
-		if r.DestinationPrefix.PrefixLength == 0 && r.Metric < lowestMetric {
-			lowestMetric = r.Metric
-			bestLUID = r.InterfaceLUID
-			bestNextHop = r.NextHop.Addr()
+	for _, args := range commands {
+		if err := exec.Command(args[0], args[1:]...).Run(); err != nil {
+			return fmt.Errorf("ошибка %v: %v", args, err)
 		}
 	}
 
-	if lowestMetric == ^uint32(0) {
-		return 0, netip.Addr{}, fmt.Errorf("шлюз не найден")
+	// Настраиваем маршрутизацию через fwmark
+	routeCmds := [][]string{
+		// Создаем дефолтный маршрут в TUN в отдельной таблице 100
+		{"ip", "route", "replace", "default", "dev", "xray0", "table", "100"},
+		
+		// Правило 1: Трафик, исходящий от самого Xray (маркированный 255), идет в обход TUN (в основную таблицу)
+		{"ip", "rule", "add", "fwmark", "255", "lookup", "main", "pref", "1000"},
+		
+		// Правило 2: Весь остальной трафик направляем в таблицу 100 (в TUN)
+		{"ip", "rule", "add", "lookup", "100", "pref", "1010"},
 	}
-	return bestLUID, bestNextHop, nil
+
+	for _, args := range routeCmds {
+		// Ошибки тут не фатальны (например, правило уже существует), поэтому просто логируем
+		if err := exec.Command(args[0], args[1:]...).Run(); err != nil {
+			fmt.Printf("предупреждение при выполнении %v: %v\n", args, err)
+		}
+	}
+
+	return nil
 }
 
-func setupRouting() error {
-	time.Sleep(3 * time.Second)
-
-	physLUID, nextHop, err := getPhysicalGateway()
-	if err != nil {
-		return err
-	}
-
-	tunIf, err := net.InterfaceByName(tunName)
-	if err != nil {
-		return err
-	}
-	tunLUID, err := winipcfg.LUIDFromIndex(uint32(tunIf.Index))
-	if err != nil {
-		return err
-	}
-
-	tunIP := netip.MustParsePrefix("172.19.0.2/24")
-	_ = tunLUID.SetIPAddresses([]netip.Prefix{tunIP})
-
-	serverIP := netip.MustParseAddr(vpsIP)
-	err = physLUID.AddRoute(netip.PrefixFrom(serverIP, 32), nextHop, 0)
-	if err != nil {
-		log.Printf("ВНИМАНИЕ: Ошибка маршрута до VPS: %v", err)
-	}
-
-	_ = tunLUID.AddRoute(netip.MustParsePrefix("0.0.0.0/1"), netip.IPv4Unspecified(), 0)
-	_ = tunLUID.AddRoute(netip.MustParsePrefix("128.0.0.0/1"), netip.IPv4Unspecified(), 0)
-
+func teardownNetwork() error {
+	// Удаляем правила при выходе
+	exec.Command("ip", "rule", "del", "fwmark", "255", "lookup", "main", "pref", "1000").Run()
+	exec.Command("ip", "rule", "del", "lookup", "100", "pref", "1010").Run()
+	exec.Command("ip", "route", "flush", "table", "100").Run()
 	return nil
 }
