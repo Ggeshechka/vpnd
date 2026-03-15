@@ -4,22 +4,41 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 
+	"github.com/kardianos/service"
 	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/infra/conf/serial"
 	_ "github.com/xtls/xray-core/main/distro/all"
 	_ "github.com/xtls/xray-core/main/json"
 )
 
-const (
-	tunName = "xray-tun"
-	vpsIP   = "188.40.167.82"
-)
+const vpsIP = "188.40.167.82"
+
+var xrayInstance *core.Instance
+
+type program struct{}
+
+func (p *program) Start(s service.Service) error {
+	go p.run()
+	return nil
+}
+
+func (p *program) run() {
+	http.HandleFunc("/start", apiStart)
+	http.HandleFunc("/stop", apiStop)
+	log.Println("Служба запущена. API слушает на 127.0.0.1:18080")
+	http.ListenAndServe("127.0.0.1:18080", nil)
+}
+
+func (p *program) Stop(s service.Service) error {
+	stopVPN()
+	return nil
+}
 
 func getPhysicalIP() (string, error) {
 	conn, err := net.Dial("udp", "8.8.8.8:80")
@@ -30,22 +49,19 @@ func getPhysicalIP() (string, error) {
 	return conn.LocalAddr().(*net.UDPAddr).IP.String(), nil
 }
 
-func startXray() (*core.Instance, error) {
-	physIP, err := getPhysicalIP()
-	if err != nil {
-		return nil, fmt.Errorf("ошибка получения физического IP: %v", err)
+func startVPN(configData []byte) error {
+	if xrayInstance != nil {
+		return fmt.Errorf("VPN уже запущен")
 	}
 
-	log.Printf("Обнаружен физический IP: %s", physIP)
-
-	data, err := os.ReadFile("config.json")
+	physIP, err := getPhysicalIP()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	var config map[string]interface{}
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, err
+	if err := json.Unmarshal(configData, &config); err != nil {
+		return err
 	}
 
 	outbounds := config["outbounds"].([]interface{})
@@ -60,47 +76,90 @@ func startXray() (*core.Instance, error) {
 	newConfigBytes, _ := json.Marshal(config)
 	pbConfig, err := serial.DecodeJSONConfig(bytes.NewReader(newConfigBytes))
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	cfg, err := pbConfig.Build()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	server, err := core.New(cfg)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if err := server.Start(); err != nil {
-		return nil, err
+		return err
+	}
+	xrayInstance = server
+
+	if err := setupNetwork(); err != nil {
+		stopVPN()
+		return fmt.Errorf("ошибка маршрутизации: %v", err)
 	}
 
-	return server, nil
+	return nil
+}
+
+func stopVPN() {
+	if xrayInstance != nil {
+		teardownNetwork()
+		xrayInstance.Close()
+		xrayInstance = nil
+	}
+}
+
+func apiStart(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	// Если тело пустое (отправили без конфига), читаем локальный config.json
+	if err != nil || len(body) == 0 {
+		body, err = os.ReadFile("config.json")
+		if err != nil {
+			http.Error(w, "Конфиг не передан и файл config.json не найден", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if err := startVPN(body); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Write([]byte("vpn_started"))
+}
+
+func apiStop(w http.ResponseWriter, r *http.Request) {
+	stopVPN()
+	w.Write([]byte("vpn_stopped"))
 }
 
 func main() {
 	os.Setenv("xray.location.asset", ".")
 
-	log.Println("Запуск Xray-core...")
-	xrayServer, err := startXray()
+	svcConfig := &service.Config{
+		Name:        "vpnd",
+		DisplayName: "VPN Daemon",
+		Description: "Фоновая служба для управления ядром VPN",
+	}
+
+	prg := &program{}
+	s, err := service.New(prg, svcConfig)
 	if err != nil {
-		log.Fatalf("Ошибка запуска Xray: %v", err)
+		log.Fatal(err)
 	}
-	defer xrayServer.Close()
 
-	log.Println("Настройка маршрутизации...")
-	if err := setupNetwork(); err != nil {
-		log.Fatalf("Ошибка маршрутизации: %v", err)
+	// Обработка команд (install, uninstall, start, stop, restart)
+	if len(os.Args) > 1 {
+		err = service.Control(s, os.Args[1])
+		if err != nil {
+			log.Fatalf("Ошибка выполнения команды %s: %v", os.Args[1], err)
+		}
+		fmt.Printf("Команда %s успешно выполнена.\n", os.Args[1])
+		return
 	}
-	defer teardownNetwork()
 
-	log.Println("VPN успешно работает. Нажмите Ctrl+C для выхода.")
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
-
-	log.Println("Остановка...")
+	// Запуск самой службы
+	if err = s.Run(); err != nil {
+		log.Fatal(err)
+	}
 }

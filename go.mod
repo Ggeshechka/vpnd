@@ -16,6 +16,7 @@ require (
 	github.com/google/btree v1.1.2 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/juju/ratelimit v1.0.2 // indirect
+	github.com/kardianos/service v1.2.4 // indirect
 	github.com/klauspost/compress v1.17.4 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.12 // indirect
 	github.com/miekg/dns v1.1.72 // indirect
