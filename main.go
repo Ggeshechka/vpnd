@@ -17,8 +17,7 @@ import (
 )
 
 const (
-	tunName = "xray-tun"
-	vpsIP   = "188.40.167.82"
+	vpsIP = "188.40.167.82"
 )
 
 func getPhysicalIP() (string, error) {
@@ -87,9 +86,10 @@ func main() {
 	}
 	defer xrayServer.Close()
 
-	if err := setupRouting(); err != nil {
+	if err := setupNetwork(); err != nil {
 		log.Fatalf("Ошибка маршрутизации: %v", err)
 	}
+	defer teardownNetwork()
 
 	log.Println("VPN работает. Нажмите Ctrl+C для выхода.")
 	sigCh := make(chan os.Signal, 1)
