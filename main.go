@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"	
+	"os/exec"
 
 	"github.com/kardianos/service"
 	"github.com/xtls/xray-core/core"
@@ -175,11 +176,23 @@ func main() {
 
 	// Обработка команд (install, uninstall, start, stop, restart)
 	if len(os.Args) > 1 {
-		err = service.Control(s, os.Args[1])
+		cmdName := os.Args[1]
+		err = service.Control(s, cmdName)
 		if err != nil {
-			log.Fatalf("Ошибка выполнения команды %s: %v", os.Args[1], err)
+			log.Fatalf("Ошибка выполнения команды %s: %v", cmdName, err)
 		}
-		fmt.Printf("Команда %s успешно выполнена.\n", os.Args[1])
+
+		// Автоматически применяем хак для Windows при установке службы
+		if cmdName == "install" {
+			scCmd := exec.Command("sc.exe", "failure", "vpnd", "reset=", "0", "actions=", "restart/0/restart/0/restart/0")
+			if err := scCmd.Run(); err != nil {
+				fmt.Printf("ВНИМАНИЕ: Не удалось настроить мгновенный рестарт: %v\n", err)
+			} else {
+				fmt.Println("Политика мгновенного рестарта успешно применена.")
+			}
+		}
+
+		fmt.Printf("Команда %s успешно выполнена.\n", cmdName)
 		return
 	}
 
