@@ -128,7 +128,7 @@ func apiStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := startVPN(body); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Ошибка запуска VPN: %v", err), http.StatusInternalServerError)
 		return
 	}
 	w.Write([]byte("vpn_started"))
@@ -148,15 +148,19 @@ func apiStop(w http.ResponseWriter, r *http.Request) {
 
 
 func main() {
-	exe, _ := os.Executable()
-	os.Setenv("xray.location.asset", filepath.Dir(exe))
+	exe, err := os.Executable()
+	if err == nil {
+		exeDir := filepath.Dir(exe)
+		os.Chdir(exeDir)
+		os.Setenv("xray.location.asset", exeDir)
+	}
 
 	svcConfig := &service.Config{
 		Name:        "vpnd",
 		DisplayName: "VPN Daemon",
 		Description: "Фоновая служба для управления ядром VPN",
 		Option: service.KeyValue{
-			"OnFailure": "restart", // <--- ДОБАВИТЬ ЭТО. Заставит Windows перезапускать процесс
+			"OnFailure": "restart",
 		},
 	}
 
