@@ -147,7 +147,6 @@ func apiStop(w http.ResponseWriter, r *http.Request) {
 }
 
 
-
 func main() {
 	exe, _ := os.Executable()
 	os.Setenv("xray.location.asset", filepath.Dir(exe))
