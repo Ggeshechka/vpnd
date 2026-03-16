@@ -141,7 +141,7 @@ func apiStop(w http.ResponseWriter, r *http.Request) {
 	// Очищаем состояние Wintun через смерть процесса
 	// Служба будет мгновенно перезапущена системой
 	go func() {
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 		os.Exit(1)
 	}()
 }
@@ -155,14 +155,17 @@ func main() {
 		os.Setenv("xray.location.asset", exeDir)
 	}
 
+
 	svcConfig := &service.Config{
 		Name:        "vpnd",
 		DisplayName: "VPN Daemon",
 		Description: "Фоновая служба для управления ядром VPN",
 		Option: service.KeyValue{
 			"OnFailure": "restart",
+			"OnFailureDelayDuration": "0s", 
 		},
 	}
+
 
 	prg := &program{}
 	s, err := service.New(prg, svcConfig)
